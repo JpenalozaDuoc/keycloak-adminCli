@@ -101,62 +101,6 @@ public class KeycloakUserService {
         return location.substring(location.lastIndexOf("/") + 1);
     }
 
-    /*
-    public void crearUsuario(UsuarioRequest request) {
-        log.info("Creando usuario: {}", request.getUsername());
-
-        // Verificar si usuario existe
-        List<KeycloakUserResponse> usuariosExistentes = listarUsuarios(request.getUsername());
-        if (!usuariosExistentes.isEmpty()) {
-            log.warn("El usuario con el username {} ya existe", request.getUsername());
-            throw new KeycloakApiException("El usuario ya existe en Keycloak.");
-        }
-
-        String token = obtenerTokenAdmin();
-
-        try {
-            Map<String, Object> userCreate = new HashMap<>();
-            userCreate.put("username", request.getUsername());
-            userCreate.put("firstName", request.getFirstName());
-            userCreate.put("lastName", request.getLastName());
-            userCreate.put("email", request.getEmail());
-            userCreate.put("emailVerified", request.getEmailVerified() != null ? request.getEmailVerified() : false);
-            userCreate.put("enabled", true);
-            userCreate.put("attributes", request.getAttributes() != null ? request.getAttributes() : Map.of());
-
-            var response = webClient.post()
-                .uri(keycloakProperties.getAdminUrl() + "/users")
-                .header("Authorization", "Bearer " + token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(userCreate)
-                .retrieve()
-                .toBodilessEntity()
-                .block();
-
-            if (response == null || response.getStatusCode().value() != 201) {
-                throw new KeycloakApiException("Error creando usuario en Keycloak");
-            }
-
-            String location = response.getHeaders().getLocation().toString();
-            String userId = location.substring(location.lastIndexOf("/") + 1);
-            log.info("Usuario creado con ID: {}", userId);
-
-            if (request.getRol() != null && !request.getRol().isEmpty()) {
-                asignarRol(token, userId, request.getRol(), keycloakProperties.getClientName());
-                log.info("Rol asignado: {}", request.getRol());
-            }
-
-            if (request.getPassword() != null && !request.getPassword().isEmpty()) {
-                establecerPassword(token, userId, request.getPassword());
-                log.info("Contraseña establecida.");
-            }
-
-        } catch (Exception e) {
-            log.error("Error creando usuario: {}", e.getMessage(), e);
-            throw new KeycloakApiException("Error al crear usuario.");
-        }
-    }
-    */
     // Obtener token admin (con clientId y secret configurados)
     private String obtenerTokenAdmin() {
         log.debug("Obteniendo token admin para Keycloak");

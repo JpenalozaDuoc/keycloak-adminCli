@@ -31,17 +31,6 @@ public class KeycloakUserController {
     }
 
     // Crear usuario
-    /*
-    @PostMapping
-    public ResponseEntity<String> crearUsuario(@RequestBody UsuarioRequest usuarioRequest) {
-        try {
-            keycloakUserService.crearUsuario(usuarioRequest);
-            return ResponseEntity.status(HttpStatus.CREATED).body("Usuario creado exitosamente");
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Error: " + e.getMessage());
-        }
-    }
-    */
     @PostMapping
     public ResponseEntity<?> crearUsuario(@Valid @RequestBody UsuarioRequest usuarioRequest) {
         try {
@@ -59,23 +48,7 @@ public class KeycloakUserController {
         List<KeycloakUserResponse> usuarios = keycloakUserService.listarUsuarios(username);
         return ResponseEntity.ok(usuarios);
     }
-
-    // Asignar rol a usuario específico
-    /*
-    @PostMapping("/{userId}/roles")
-    public ResponseEntity<String> asignarRol(
-            @PathVariable String userId,
-            @RequestParam String rol
-    ) {
-        try {
-            keycloakUserService.asignarRolAdmin(userId, rol);
-            return ResponseEntity.ok("Rol asignado correctamente");
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Error: " + e.getMessage());
-        }
-    }
-    */
-
+    
     // Asignar rol a usuario específico
     @PostMapping("/{userId}/roles")
     public ResponseEntity<?> asignarRol(
