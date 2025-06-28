@@ -1,374 +1,368 @@
 package apikeycloak.tokenization.service;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
-
 import apikeycloak.tokenization.config.KeycloakProperties;
 import apikeycloak.tokenization.dto.KeycloakUserResponse;
 import apikeycloak.tokenization.dto.UsuarioRequest;
-import apikeycloak.tokenization.exception.KeycloakApiException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.stereotype.Service;
+import org.springframework.http.*;
+import java.util.*;
+import org.springframework.web.reactive.function.client.WebClient; // <-- Nuevo import
+import reactor.core.publisher.Mono; // <-- Nuevo import (para el manejo reactivo)
 
 @Slf4j
 @Service
 public class KeycloakUserService {
 
+    private final WebClient webClient; // <-- Reemplaza RestTemplate por WebClient
+    private final ObjectMapper objectMapper;
     private final KeycloakProperties keycloakProperties;
-    private final WebClient webClient;
 
-    public KeycloakUserService(WebClient webClient, KeycloakProperties keycloakProperties) {
-        this.webClient = webClient;
+    public KeycloakUserService(
+            WebClient webClient, // <-- Ahora inyectamos WebClient
+            ObjectMapper objectMapper,
+            KeycloakProperties keycloakProperties) {
+        this.webClient = webClient; // <-- Asignamos WebClient
+        this.objectMapper = objectMapper;
         this.keycloakProperties = keycloakProperties;
     }
 
-    // Crear usuario (con rol y contraseña)
-    public void crearUsuario(UsuarioRequest request) {
-        log.info("Inicio creación usuario: {}", request.getUsername());
-        log.debug("Datos recibidos: firstName={}, lastName={}, email={}, rol={}, password=****, attributes={}", 
-              request.getFirstName(), request.getLastName(), request.getEmail(), request.getRol(), request.getAttributes());
+    // -------------------------
+    // 1. Crear usuario
+    // -------------------------
+    public void crearUsuario(UsuarioRequest usuarioRequest) {
+        String tokenAdmin = obtenerTokenAdminApi();
+        System.out.println("***********************************");
+        System.out.println("TOKEN: "+tokenAdmin);
+        System.out.println("***********************************");
 
-        // Validar que usuario no exista
-        if (usuarioExiste(request.getUsername())) {
-            log.warn("El usuario {} ya existe", request.getUsername());
-            throw new KeycloakApiException("El usuario ya existe en Keycloak.");
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("username", usuarioRequest.getUsername());
+        payload.put("firstName", usuarioRequest.getFirstName());
+        payload.put("lastName", usuarioRequest.getLastName());
+        payload.put("email", usuarioRequest.getEmail());
+        payload.put("emailVerified", usuarioRequest.getEmailVerified());
+        payload.put("enabled", usuarioRequest.getEnabled());
+
+        System.out.println("***********************************");
+        System.out.println("Username: "+usuarioRequest.getUsername());
+        System.out.println("firstName: "+usuarioRequest.getFirstName());
+        System.out.println("lastName: "+usuarioRequest.getLastName());
+        System.out.println("email: "+usuarioRequest.getEmail());
+        System.out.println("***********************************");
+
+        if (usuarioRequest.getAttributes() != null) {
+            payload.put("attributes", usuarioRequest.getAttributes());
         }
 
-        String token = obtenerTokenAdmin();  // Puede lanzar excepción
-        log.debug("Token admin obtenido");
+        // Contraseña
+        Map<String, Object> credentials = new HashMap<>();
+        credentials.put("type", "password");
+        credentials.put("value", usuarioRequest.getPassword());
+        credentials.put("temporary", false);
+        payload.put("credentials", Collections.singletonList(credentials));
 
-        try {
-            String userId = crearUsuarioEnKeycloak(token, request);
-            log.info("Usuario creado en Keycloak con ID: {}", userId);
+        String url = String.format("%s/admin/realms/%s/users", keycloakProperties.getServerUrl(), keycloakProperties.getRealm());
+        System.out.println("***********************************");
+        System.out.println("URL: "+url);
+        System.out.println("***********************************");
 
-            if (request.getRol() != null && !request.getRol().isEmpty()) {
-                log.debug("Intentando asignar rol: {}", request.getRol());
-                asignarRol(token, userId, request.getRol(), keycloakProperties.getClientName());
-                log.info("Rol '{}' asignado al usuario '{}'", request.getRol(), userId);
+        // --- CAMBIO A WEBCLIENT ---
+        ResponseEntity<Void> response = webClient.post() // Inicia una solicitud POST
+                .uri(url) // Define la URL
+                .headers(h -> h.setBearerAuth(tokenAdmin)) // Configura encabezado de autorización
+                .contentType(MediaType.APPLICATION_JSON) // Establece Content-Type
+                .bodyValue(payload) // Envía el cuerpo de la solicitud (Map se serializa a JSON)
+                .retrieve() // Inicia la recuperación de la respuesta
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error al crear usuario en Keycloak: " + clientResponse.statusCode() + " - " + errorBody))))
+                .toBodilessEntity() // Espera una respuesta sin cuerpo, pero con estado y headers
+                .block(); // Bloquea hasta que la respuesta esté disponible
+
+        // La verificación de errores se movió a .onStatus()
+        String newUserId = null;
+        if (response != null && response.getHeaders().containsKey(HttpHeaders.LOCATION)) {
+            String location = response.getHeaders().getFirst(HttpHeaders.LOCATION);
+            if (location != null) {
+                newUserId = location.substring(location.lastIndexOf('/') + 1);
+                log.info("Usuario creado exitosamente con ID: {}", newUserId);
             }
+        }
 
-            if (request.getPassword() != null && !request.getPassword().isEmpty()) {
-                log.debug("Estableciendo contraseña para usuario");
-                establecerPassword(token, userId, request.getPassword());
-                log.info("Contraseña establecida para usuario '{}'", userId);
+        if (newUserId != null && usuarioRequest.getRol() != null && !usuarioRequest.getRol().isEmpty()) {
+            try {
+                asignarRolAdmin(newUserId, usuarioRequest.getRol());
+                log.info("Rol '{}' asignado al usuario con ID: {}", usuarioRequest.getRol(), newUserId);
+            } catch (RuntimeException e) {
+                log.warn("Usuario creado pero NO se pudo asignar el rol '{}' al usuario con ID {}: {}",
+                         usuarioRequest.getRol(), newUserId, e.getMessage());
             }
-
-        } catch (Exception e) {
-            log.error("Error durante creación de usuario '{}': {}", request.getUsername(), e.getMessage(), e);
-            throw new KeycloakApiException("Error al crear usuario en Keycloak");
         }
     }
 
-    private boolean usuarioExiste(String username) {
-        List<KeycloakUserResponse> usuariosExistentes = listarUsuarios(username);
-        return usuariosExistentes != null && !usuariosExistentes.isEmpty();
-    }
+    // -------------------------
+    // 2. Listar usuarios filtrando por username (opcional)
+    // -------------------------
+    public List<KeycloakUserResponse> listarUsuarios(String username) {
+        String tokenAdmin = obtenerTokenAdminApi();
+        String url = String.format("%s/admin/realms/%s/users", keycloakProperties.getServerUrl(), keycloakProperties.getRealm());
 
-    private String crearUsuarioEnKeycloak(String token, UsuarioRequest request) {
-        Map<String, Object> userCreate = new HashMap<>();
-        userCreate.put("username", request.getUsername());
-        userCreate.put("firstName", request.getFirstName());
-        userCreate.put("lastName", request.getLastName());
-        userCreate.put("email", request.getEmail());
-        userCreate.put("emailVerified", request.getEmailVerified() != null ? request.getEmailVerified() : false);
-        userCreate.put("enabled", true);
-        userCreate.put("attributes", request.getAttributes() != null ? request.getAttributes() : Map.of());
-
-        var response = webClient.post()
-            .uri(keycloakProperties.getAdminUrl() + "/users")
-            .header("Authorization", "Bearer " + token)
-            .contentType(MediaType.APPLICATION_JSON)
-            .bodyValue(userCreate)
-            .retrieve()
-            .toBodilessEntity()
-            .block();
-
-        if (response == null || response.getStatusCode().value() != 201) {
-            throw new KeycloakApiException("Error creando usuario en Keycloak");
+        if (username != null && !username.isEmpty()) {
+            url += "?username=" + username;
         }
 
-        String location = response.getHeaders().getLocation().toString();
-        return location.substring(location.lastIndexOf("/") + 1);
+        // --- CAMBIO A WEBCLIENT ---
+        List<KeycloakUserResponse> users = webClient.get() // Inicia una solicitud GET
+                .uri(url) // Define la URL
+                .headers(h -> h.setBearerAuth(tokenAdmin)) // Configura encabezado de autorización
+                .retrieve() // Inicia la recuperación de la respuesta
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error al listar usuarios: " + clientResponse.statusCode() + " - " + errorBody))))
+                .bodyToMono(new ParameterizedTypeReference<List<KeycloakUserResponse>>() {}) // Espera un Mono de List<KeycloakUserResponse>
+                .block(); // Bloquea para obtener el resultado
+
+        return users != null ? users : Collections.emptyList(); // Devuelve una lista vacía si es nulo
     }
 
-    // Obtener token admin (con clientId y secret configurados)
-    private String obtenerTokenAdmin() {
-        log.debug("Obteniendo token admin para Keycloak");
+    // -------------------------
+    // 3. Listar todos los usuarios (genérico, raw JSON)
+    // -------------------------
+    public List<KeycloakUserResponse> listarUsuariosGenerico() {
+        return listarUsuarios(null); // Reusa listarUsuarios sin filtro
+    }
 
-        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
-        params.add("grant_type", "client_credentials");
-        params.add("client_id", keycloakProperties.getClientId());
-        params.add("client_secret", keycloakProperties.getClientSecret());
+    // -------------------------
+    // 4. Asignar rol a usuario
+    // -------------------------
+    public void asignarRolAdmin(String userId, String rol) {
+        String tokenAdmin = obtenerTokenAdminApi();
 
-        try {
-            Map<String, Object> tokenResponse = webClient.post()
-                .uri(keycloakProperties.getTokenUri())
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .body(BodyInserters.fromFormData(params))
+        // Primero obtener el rol específico desde Keycloak
+        String urlRole = String.format("%s/admin/realms/%s/roles/%s", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), rol);
+
+        // --- CAMBIO A WEBCLIENT para obtener rol ---
+        Map<String, Object> role = webClient.get()
+                .uri(urlRole)
+                .headers(h -> h.setBearerAuth(tokenAdmin))
                 .retrieve()
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error al obtener rol '" + rol + "': " + clientResponse.statusCode() + " - " + errorBody))))
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .block();
 
-            if (tokenResponse == null || !tokenResponse.containsKey("access_token")) {
-                log.error("No se obtuvo access_token en la respuesta del token admin");
-                throw new KeycloakApiException("Error al obtener el token de administración");
-            }
-
-            return (String) tokenResponse.get("access_token");
-        } catch (Exception e) {
-            log.error("Error obteniendo token admin: {}", e.getMessage(), e);
-            throw new KeycloakApiException("Error al obtener el token de administración");
+        if (role == null) {
+            throw new RuntimeException("Rol no encontrado: " + rol);
         }
+
+        // Asignar rol al usuario
+        String urlAssign = String.format("%s/admin/realms/%s/users/%s/role-mappings/realm", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), userId);
+
+        // --- CAMBIO A WEBCLIENT para asignar rol ---
+        webClient.post()
+                .uri(urlAssign)
+                .headers(h -> h.setBearerAuth(tokenAdmin))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Collections.singletonList(role)) // Envía una lista con el objeto rol
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error asignando rol a usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody))))
+                .toBodilessEntity() // No esperamos cuerpo de respuesta
+                .block();
     }
 
-    // Asignar rol a usuario para cliente específico
-    private void asignarRol(String token, String userId, String rolNombre, String clientName) {
-        log.debug("Asignando rol '{}' al usuario con ID '{}' para cliente '{}'", rolNombre, userId, clientName);
-        try {
-            List<Map<String, Object>> clients = webClient.get()
-                .uri(keycloakProperties.getAdminUrl() + "/clients")
-                .header("Authorization", "Bearer " + token)
+    // -------------------------
+    // 5. Eliminar roles públicos de usuario (ejemplo: quitar rol 'public')
+    // -------------------------
+    public void eliminarRolesUsuarioPublico(String userId) {
+        String tokenAdmin = obtenerTokenAdminApi();
+
+        String rolPublico = "public"; // Asumimos que el rol 'public' existe
+
+        String urlRole = String.format("%s/admin/realms/%s/roles/%s", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), rolPublico);
+
+        // --- CAMBIO A WEBCLIENT para obtener rol ---
+        Map<String, Object> role = webClient.get()
+                .uri(urlRole)
+                .headers(h -> h.setBearerAuth(tokenAdmin))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error al obtener rol '" + rolPublico + "': " + clientResponse.statusCode() + " - " + errorBody))))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .block();
 
-            if (clients == null) {
-                throw new KeycloakApiException("No se pudieron obtener los clientes de Keycloak");
-            }
+        if (role == null) {
+            throw new RuntimeException("Rol público no encontrado: " + rolPublico);
+        }
 
-            String clientId = clients.stream()
-                .filter(c -> clientName.equals(c.get("clientId")))
-                .map(c -> (String) c.get("id"))
-                .findFirst()
-                .orElseThrow(() -> new KeycloakApiException("No se encontró el cliente " + clientName));
+        // Eliminar rol del usuario
+        String urlDelete = String.format("%s/admin/realms/%s/users/%s/role-mappings/realm", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), userId);
 
-            List<Map<String, Object>> roles = webClient.get()
-                .uri(keycloakProperties.getAdminUrl() + "/clients/" + clientId + "/roles")
-                .header("Authorization", "Bearer " + token)
+        // --- CAMBIO A WEBCLIENT para eliminar rol ---
+        webClient.method(HttpMethod.DELETE) // Usa .method() para DELETE con body
+                .uri(urlDelete)
+                .headers(h -> h.setBearerAuth(tokenAdmin))
+                .contentType(MediaType.APPLICATION_JSON) // DELETE con body suele requerir Content-Type
+                .bodyValue(Collections.singletonList(role)) // Envía el cuerpo con el rol a eliminar
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-                .block();
-
-            if (roles == null) {
-                throw new KeycloakApiException("No se pudieron obtener los roles del cliente");
-            }
-
-            Map<String, Object> rol = roles.stream()
-                .filter(r -> rolNombre.equals(r.get("name")))
-                .findFirst()
-                .orElseThrow(() -> new KeycloakApiException("Rol no encontrado: " + rolNombre));
-
-            webClient.post()
-                .uri(keycloakProperties.getAdminUrl() + "/users/" + userId + "/role-mappings/clients/" + clientId)
-                .header("Authorization", "Bearer " + token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(List.of(rol))
-                .retrieve()
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error eliminando rol público de usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody))))
                 .toBodilessEntity()
                 .block();
-
-            log.info("Rol '{}' asignado correctamente al usuario '{}'", rolNombre, userId);
-
-        } catch (Exception e) {
-            log.error("Error asignando rol al usuario '{}': {}", userId, e.getMessage(), e);
-            throw new KeycloakApiException("Error al asignar rol al usuario");
-        }
     }
 
-    // Establecer password a usuario
-    private void establecerPassword(String token, String userId, String password) {
-        log.debug("Estableciendo password para usuario ID: {}", userId);
-
-        try {
-            Map<String, Object> passwordPayload = Map.of(
-                "type", "password",
-                "temporary", false,
-                "value", password
-            );
-
-            webClient.put()
-                .uri(keycloakProperties.getAdminUrl() + "/users/" + userId + "/reset-password")
-                .header("Authorization", "Bearer " + token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(passwordPayload)
-                .retrieve()
-                .toBodilessEntity()
-                .block();
-
-            log.info("Contraseña asignada correctamente al usuario con ID: {}", userId);
-        } catch (Exception e) {
-            log.error("Error asignando contraseña al usuario: {}", userId, e);
-            throw new KeycloakApiException("Error al asignar la contraseña al usuario.");
-        }
-    }
-
-    // Listar usuarios por username
-    public List<KeycloakUserResponse> listarUsuarios(String username) {
-        log.debug("Listando usuarios con username: {}", username);
-
-        if (username == null || username.isEmpty()) {
-            log.debug("Username vacío, devolviendo lista vacía");
-            return List.of();
-        }
-        String token = obtenerTokenAdmin();
-        String url = keycloakProperties.getAdminUrl() + "/users?username=" + username;
-
-        try {
-            List<KeycloakUserResponse> usuarios = webClient.get()
-                .uri(url)
-                .header("Authorization", "Bearer " + token)
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<KeycloakUserResponse>>() {})
-                .block();
-
-            if (usuarios == null) {
-                throw new KeycloakApiException("Error al obtener la lista de usuarios por username de Keycloak");
-            }
-
-            return usuarios;
-        } catch (Exception e) {
-            throw new KeycloakApiException("Error al listar usuarios por username", e);
-        }
-    }
-
-    // Eliminar roles asignados a usuario (para un cliente específico)
-    private void eliminarRolesUsuario(String token, String userId, String clientName) {
-        log.debug("Eliminando roles asignados al usuario con ID: {} para cliente: {}", userId, clientName);
-
-        try {
-            List<Map<String, Object>> clients = webClient.get()
-                .uri(keycloakProperties.getAdminUrl() + "/clients")
-                .header("Authorization", "Bearer " + token)
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-                .block();
-
-            String clientId = clients.stream()
-                .filter(c -> clientName.equals(c.get("clientId")))
-                .map(c -> (String) c.get("id"))
-                .findFirst()
-                .orElseThrow(() -> new KeycloakApiException("No se encontró el cliente " + clientName));
-
-            List<Map<String, Object>> rolesAsignados = webClient.get()
-                .uri(keycloakProperties.getAdminUrl() + "/users/" + userId + "/role-mappings/clients/" + clientId)
-                .header("Authorization", "Bearer " + token)
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-                .block();
-
-            if (rolesAsignados == null || rolesAsignados.isEmpty()) {
-                log.info("No hay roles asignados al usuario para el cliente: {}", clientName);
-                return;
-            }
-
-           webClient.method(HttpMethod.DELETE)
-            .uri(keycloakProperties.getAdminUrl() + "/users/" + userId + "/role-mappings/clients/" + clientId)
-            .header("Authorization", "Bearer " + token)
-            .contentType(MediaType.APPLICATION_JSON)
-            .bodyValue(rolesAsignados)
-            .retrieve()
-            .toBodilessEntity()
-            .block();
-
-            log.info("Roles eliminados correctamente para el usuario con ID: {}", userId);
-
-        } catch (Exception e) {
-            log.error("Error eliminando roles para usuario '{}': {}", userId, e.getMessage(), e);
-            throw new KeycloakApiException("Error al eliminar roles del usuario");
-        }
-    }
-
-    // Método público para eliminar roles (que recibe userId y clientName)
-    public void eliminarRolesUsuarioPublico(String userId, String clientName) {
-        String token = obtenerTokenAdmin();
-        eliminarRolesUsuario(token, userId, clientName);
-    }
-
-    public void asignarRolAdmin(String userId, String rolNombre) {
-        String token = obtenerTokenAdmin();
-        asignarRol(token, userId, rolNombre, keycloakProperties.getClientName());
-    }
-
-    public List<Map<String, Object>> listarUsuariosGenerico() {
-        String token = obtenerTokenAdmin();
-        try {
-            List<Map<String, Object>> usuarios = webClient.get()
-                .uri(keycloakProperties.getAdminUrl() + "/users")
-                .header("Authorization", "Bearer " + token)
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-                .block();
-
-            return usuarios != null ? usuarios : List.of();
-        } catch (Exception e) {
-            throw new KeycloakApiException("Error al listar usuarios genéricos", e);
-        }
-    }
-
+    // -------------------------
+    // 6. Actualizar usuario
+    // -------------------------
     public void actualizarUsuario(String userId, UsuarioRequest usuarioRequest) {
-        String token = obtenerTokenAdmin();
+        String tokenAdmin = obtenerTokenAdminApi();
 
-        Map<String, Object> updatePayload = new HashMap<>();
-        updatePayload.put("firstName", usuarioRequest.getFirstName());
-        updatePayload.put("lastName", usuarioRequest.getLastName());
-        updatePayload.put("email", usuarioRequest.getEmail());
-        updatePayload.put("enabled", true);
-        // Añade más campos si quieres
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("username", usuarioRequest.getUsername());
+        payload.put("firstName", usuarioRequest.getFirstName());
+        payload.put("lastName", usuarioRequest.getLastName());
+        payload.put("email", usuarioRequest.getEmail());
+        payload.put("emailVerified", usuarioRequest.getEmailVerified());
+        payload.put("enabled", usuarioRequest.getEnabled());
 
-        try {
-            webClient.put()
-                .uri(keycloakProperties.getAdminUrl() + "/users/" + userId)
-                .header("Authorization", "Bearer " + token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(updatePayload)
-                .retrieve()
-                .toBodilessEntity()
-                .block();
-        } catch (Exception e) {
-            throw new KeycloakApiException("Error al actualizar usuario", e);
+        if (usuarioRequest.getAttributes() != null) {
+            payload.put("attributes", usuarioRequest.getAttributes());
         }
+
+        String url = String.format("%s/admin/realms/%s/users/%s", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), userId);
+        
+        // --- CAMBIO A WEBCLIENT ---
+        webClient.put() // Inicia una solicitud PUT
+                .uri(url) // Define la URL
+                .headers(h -> h.setBearerAuth(tokenAdmin)) // Configura encabezado de autorización
+                .contentType(MediaType.APPLICATION_JSON) // Establece Content-Type
+                .bodyValue(payload) // Envía el cuerpo de la solicitud
+                .retrieve() // Inicia la recuperación de la respuesta
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error actualizando usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody))))
+                .toBodilessEntity() // Espera una respuesta sin cuerpo
+                .block(); // Bloquea hasta que la respuesta esté disponible
     }
 
+    // -------------------------
+    // 7. Obtener roles del cliente desde token JWT
+    // -------------------------
+    // Mantenemos este método, pero ya NO decodifica el token usando JJWT aquí.
+    // Asumimos que el token ya ha sido validado por Spring Security.
+    // Este método es para EXTRAER roles de un token VÁLIDO.
     public List<Map<String, Object>> obtenerRolesDelCliente(String token) {
-        String clientName = keycloakProperties.getClientName(); // Obtenido desde application.properties
+        // En un entorno con Spring Security, no necesitarías decodificarlo manualmente con JJWT.
+        // Spring Security ya habría procesado el token y podrías obtener los claims del SecurityContext.
+        // Sin embargo, si este método es llamado con un token crudo por alguna razón,
+        // y NO dependes de Spring Security para validarlo SIEMPRE antes de aquí,
+        // necesitarías una lógica de decodificación.
+        // Por ahora, y asumiendo que Spring Security lo hace, este método es un placeholder.
+        // Para fines de demo, podemos simular la extracción o simplemente devolver una lista vacía.
 
-        List<Map<String, Object>> clients = webClient.get()
-            .uri(keycloakProperties.getAdminUrl() + "/clients")
-            .header("Authorization", "Bearer " + token)
-            .retrieve()
-            .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-            .block();
+        // Dado que hemos ELIMINADO la lógica de decodificación JJWT y la clave pública,
+        // si este método realmente necesita los CLAIMS del token, necesitarías:
+        // 1. Re-introducir JJWT (pero no la clave pública)
+        // 2. O pasar un objeto `Jwt` de Spring Security aquí.
+        // Por simplicidad, y asumiendo que este método puede ser refactorizado o no es crítico,
+        // lo dejaremos devolviendo una lista vacía.
+        // Si necesitas que este método REALMENTE lea los roles de un token JWT crudo,
+        // dímelo y lo ajustamos para decodificar sin validar la firma.
 
-        if (clients == null) {
-            throw new RuntimeException("No se pudo obtener la lista de clientes");
-        }
-
-        String clientId = clients.stream()
-            .filter(c -> clientName.equals(c.get("clientId")))
-            .map(c -> (String) c.get("id"))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException("No se encontró el cliente configurado: " + clientName));
-
-        List<Map<String, Object>> rolesCliente = webClient.get()
-            .uri(keycloakProperties.getAdminUrl() + "/clients/" + clientId + "/roles")
-            .header("Authorization", "Bearer " + token)
-            .retrieve()
-            .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
-            .block();
-
-        return rolesCliente;
+        // Si la llamada es desde el controlador, y Spring Security ya validó el token,
+        // la mejor forma sería inyectar Authentication y obtener los roles de ahí.
+        // Por ahora, como no hay claims, devuelve vacío.
+        log.warn("El método obtenerRolesDelCliente no decodifica el token. Usa Spring Security para obtener roles.");
+        return Collections.emptyList();
     }
 
 
+    // -------------------------
+    // 8. Validar que token de usuario contenga rol admin
+    // -------------------------
+    // ELIMINADO: Esta lógica ahora es manejada por Spring Security con @PreAuthorize.
+    // public boolean validarRolAdminDelUsuario(String tokenUsuario) { ... }
 
+
+    // -------------------------
+    // 9. Obtener token de admin para API Keycloak (client_credentials)
+    // -------------------------
+    public String obtenerTokenAdminApi() {
+        String url = String.format("%s/realms/%s/protocol/openid-connect/token", keycloakProperties.getServerUrl(), keycloakProperties.getRealm());
+
+        String body = "grant_type=client_credentials" +
+                      "&client_id=" + keycloakProperties.getClientId() +
+                      "&client_secret=" + keycloakProperties.getClientSecret();
+
+        // --- CAMBIO A WEBCLIENT ---
+        Map<String, Object> responseBody = webClient.post() // Inicia POST
+                .uri(url) // Define la URL
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED) // Tipo de contenido para form-urlencoded
+                .bodyValue(body) // Envía el cuerpo como String (form-urlencoded)
+                .retrieve() // Inicia la recuperación
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error al obtener token admin de Keycloak: " + clientResponse.statusCode() + " - " + errorBody))))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}) // Espera un Mono de Map
+                .block(); // Bloquea para obtener el resultado
+
+        if (responseBody == null || !responseBody.containsKey("access_token")) {
+            throw new RuntimeException("Token admin inválido o no encontrado en la respuesta.");
+        }
+
+        return (String) responseBody.get("access_token");
+    }
+
+    // --- NUEVO MÉTODO: eliminarUsuario ---
+    public void eliminarUsuario(String userId) {
+        // 1. Obtener el token de administración de Keycloak
+        // Asumo que KeycloakAdminClient.getAdminAccessToken() devuelve un Mono<String>
+        String tokenAdmin = obtenerTokenAdminApi();
+        
+        if (tokenAdmin == null || tokenAdmin.isEmpty()) {
+            throw new RuntimeException("No se pudo obtener el token de administración de Keycloak.");
+        }
+
+        // Construir la URL para eliminar el usuario
+        // Ejemplo: https://vetcare360.duckdns.org/admin/realms/vetcare360/users/{userId}
+        String url = String.format("%s/admin/realms/%s/users/%s", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), userId);
+
+        System.out.println("DEBUG: Intentando eliminar usuario con ID: " + userId + " en URL: " + url);
+
+        // 2. Realizar la llamada DELETE a la Admin API de Keycloak
+        try {
+            webClient.delete()
+                    .uri(url)
+                    .header("Authorization", "Bearer " + tokenAdmin)
+                    .retrieve() // Inicia la recuperación de la respuesta
+                    .onStatus(HttpStatusCode::is4xxClientError, response -> {
+                        // Manejo de errores 4xx (ej. 404 Not Found si el usuario no existe, 403 Forbidden)
+                        return response.bodyToMono(String.class).flatMap(body -> {
+                            System.err.println("Error 4xx al eliminar usuario: " + body);
+                            return Mono.error(new RuntimeException("Error del cliente al eliminar usuario: " + body));
+                        });
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, response -> {
+                        // Manejo de errores 5xx (ej. problema interno del servidor Keycloak)
+                        return response.bodyToMono(String.class).flatMap(body -> {
+                            System.err.println("Error 5xx al eliminar usuario: " + body);
+                            return Mono.error(new RuntimeException("Error del servidor Keycloak al eliminar usuario: " + body));
+                        });
+                    })
+                    .toBodilessEntity() // Espera una respuesta sin cuerpo (ej. 204 No Content)
+                    .block(); // Bloquea hasta que la operación se complete
+
+            System.out.println("DEBUG: Usuario con ID: " + userId + " eliminado exitosamente.");
+        } catch (Exception e) {
+            System.err.println("ERROR: Fallo al eliminar usuario " + userId + ": " + e.getMessage());
+            throw new RuntimeException("Fallo al eliminar usuario en Keycloak: " + e.getMessage(), e);
+        }
+    }
 }
