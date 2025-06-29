@@ -215,5 +215,74 @@ public class KeycloakUserController {
                     .body(Collections.singletonMap("error", "Error al eliminar usuario: " + e.getMessage()));
         }
     }
+
+
+     // --- NUEVOS ENDPOINTS PARA BUSCAR USUARIOS POR ROL ---
+
+    /**
+     * Endpoint para obtener usuarios por un rol de cliente específico.
+     * Requiere el rol 'ADMIN' para acceder.
+     * @param roleName El nombre del rol de cliente (ej. "veterinario", "asistente").
+     * @return Mono<ResponseEntity<List<Map<String, Object>>>> Una respuesta HTTP con la lista de usuarios.
+     */
+   // --- NUEVOS ENDPOINTS PARA BUSCAR USUARIOS POR ROL (CORREGIDOS) ---
+
+    @GetMapping("/byClientRole/{roleName}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> getUsersByClientRole(@PathVariable String roleName) {
+        System.out.println("--- CONTROLADOR: Solicitando usuarios con rol de cliente: " + roleName + " ---");
+        
+        return keycloakAdminClient.getUsersByClientRole(roleName)
+                .map(users -> {
+                    if (users.isEmpty()) {
+                        System.out.println("No se encontraron usuarios con el rol '" + roleName + "'.");
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, Object>> emptyList = (List<Map<String, Object>>) Collections.EMPTY_LIST;
+                        return ResponseEntity.ok(emptyList);
+                    }
+                    System.out.println("Usuarios con el rol '" + roleName + "' obtenidos: " + users.size());
+                    return ResponseEntity.ok(users);
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error en el controlador al obtener usuarios por rol de cliente '" + roleName + "': " + e.getMessage());
+                    // Asegúrate de que el tipo devuelto coincida exactamente
+                    // Castear explícitamente para evitar la inferencia genérica amplia
+                    List<Map<String, Object>> errorBody = Collections.singletonList(
+                        Collections.singletonMap("error", "Error al obtener usuarios por rol: " + e.getMessage())
+                    );
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody));
+                });
+    }
+
+    /**
+     * Endpoint para obtener usuarios por un rol de REINO específico.
+     * Requiere el rol 'ADMIN' para acceder.
+     * @param roleName El nombre del rol de reino (ej. "uma_authorization", "offline_access").
+     * @return Mono<ResponseEntity<List<Map<String, Object>>>> Una respuesta HTTP con la lista de usuarios.
+     */
+    @GetMapping("/byRealmRole/{roleName}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> getUsersByRealmRole(@PathVariable String roleName) {
+        System.out.println("--- CONTROLADOR: Solicitando usuarios con rol de reino: " + roleName + " ---");
+
+        return keycloakAdminClient.getUsersByRealmRole(roleName)
+                .map(users -> {
+                    // Ensure the type is List<Map<String, Object>>
+                    List<Map<String, Object>> castedUsers = (List<Map<String, Object>>) users;
+                    if (castedUsers == null || castedUsers.isEmpty()) {
+                        System.out.println("No se encontraron usuarios con el rol de reino '" + roleName + "'.");
+                        return ResponseEntity.ok(Collections.<Map<String, Object>>emptyList());
+                    }
+                    System.out.println("Usuarios con el rol de reino '" + roleName + "' obtenidos: " + castedUsers.size());
+                    return ResponseEntity.ok(castedUsers);
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error en el controlador al obtener usuarios por rol de reino '" + roleName + "': " + e.getMessage());
+                    List<Map<String, Object>> errorBody = Collections.singletonList(
+                        Collections.singletonMap("error", "Error al obtener usuarios por rol de reino: " + e.getMessage())
+                    );
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorBody));
+                });
+    }
     
 }

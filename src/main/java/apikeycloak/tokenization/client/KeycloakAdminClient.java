@@ -355,4 +355,70 @@ public class KeycloakAdminClient {
                     });
         });
     }
+
+    /** AQUI VA LA LOGICA DE OBTENER USUARIOS POR EL ROL */
+    
+    // --- Métodos de búsqueda de usuarios por rol ---
+
+    /**
+     * Obtiene una lista de usuarios que tienen asignado directamente un rol de REINO.
+     * Nota: Esto no incluye usuarios que obtienen el rol a través de grupos o roles compuestos.
+     * @param realmRoleName El nombre del rol de reino (ej. "realm_admin").
+     * @return Mono<List<Map<String, Object>>> que emite una lista de objetos de usuario (Map).
+     */
+    public Mono<List<Map<String, Object>>> getUsersByRealmRole(String realmRoleName) {
+        return getAdminAccessToken().flatMap(token ->
+            webClient.get()
+                .uri(adminUrl + "/roles/" + URLEncoder.encode(realmRoleName, StandardCharsets.UTF_8) + "/users")
+                .headers(headers -> headers.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .onErrorResume(e -> {
+                    System.err.println("Error al obtener usuarios con rol de reino '" + realmRoleName + "': " + e.getMessage());
+                    return Mono.error(new RuntimeException("Error al obtener usuarios por rol de reino", e));
+                })
+        );
+    }
+
+    /**
+     * Obtiene una lista de usuarios que tienen asignado directamente un rol de CLIENTE
+     * para el cliente de la aplicación principal (definido por 'clientName').
+     * Nota: Esto no incluye usuarios que obtienen el rol a través de grupos o roles compuestos.
+     * @param clientRoleName El nombre del rol de cliente (ej. "admin", "veterinario").
+     * @return Mono<List<Map<String, Object>>> que emite una lista de objetos de usuario (Map).
+     */
+    public Mono<List<Map<String, Object>>> getUsersByClientRole(String clientRoleName) {
+        return getAdminAccessToken().flatMap(token ->
+            // Paso 1: Obtener el UUID del cliente por su client_id
+            webClient.get()
+                .uri(adminUrl + "/clients?clientId=" + URLEncoder.encode(this.clientName, StandardCharsets.UTF_8))
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .flatMap(clients -> {
+                    if (clients == null || clients.isEmpty()) {
+                        System.err.println("Cliente Keycloak con ID '" + this.clientName + "' no encontrado para buscar roles.");
+                        return Mono.<List<Map<String, Object>>>just(Collections.emptyList()); // Devuelve lista vacía si el cliente no existe
+                    }
+                    String clientUuid = (String) clients.get(0).get("id");
+
+                    // Paso 2: Obtener los usuarios asignados directamente a ese rol del cliente
+                    String usersByClientRoleUrl = adminUrl + "/clients/" + clientUuid + "/roles/" + URLEncoder.encode(clientRoleName, StandardCharsets.UTF_8) + "/users";
+                    return webClient.get()
+                        .uri(usersByClientRoleUrl)
+                        .headers(h -> h.setBearerAuth(token))
+                        .retrieve()
+                        .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                        .onErrorResume(e -> {
+                            System.err.println("Error al obtener usuarios con rol de cliente '" + clientRoleName + "' para cliente '" + this.clientName + "': " + e.getMessage());
+                            return Mono.error(new RuntimeException("Error al obtener usuarios por rol de cliente", e));
+                        });
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error al buscar cliente o rol para obtener usuarios por rol de cliente: " + e.getMessage());
+                    return Mono.error(new RuntimeException("Error en proceso de getUsersByClientRole", e));
+                })
+        );
+    }
+
 }
