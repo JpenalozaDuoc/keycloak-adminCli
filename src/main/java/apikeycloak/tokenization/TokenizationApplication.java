@@ -9,5 +9,4 @@ public class TokenizationApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(TokenizationApplication.class, args);
 	}
-
 }

@@ -7,16 +7,15 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "keycloak")
 public class KeycloakProperties {
 
-    private String tokenUri;
-    private String clientId;
-    private String clientSecret;
-    private String adminUrl;
-    private String realm;
-    private String clientName;
-    private String serverUrl;
-
+    private String tokenUri; //keycloak.token-uri=https://vetcare360.duckdns.org/realms/vetcare360/protocol/openid-connect/token
+    private String clientId;    //keycloak.client-id=vetcare-app-service
+    private String clientSecret;    //keycloak.client-secret=mdPFoNqBDe97jq4o1ZoCFsOFDWdf5JjD
+    private String adminUrl;    //keycloak.admin-url=https://vetcare360.duckdns.org/admin/realms/vetcare360
+    private String realm;   //keycloak.realm=vetcare360
+    private String clientName;  //keycloak.client-name=vetcare-app
+    private String serverUrl;   //keycloak.server-url=ttps://vetcare360.duckdns.org
+    
     // Getters y Setters
-
     public String getTokenUri() {
         return tokenUri;
     }
