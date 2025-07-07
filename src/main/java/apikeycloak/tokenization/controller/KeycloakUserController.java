@@ -228,7 +228,7 @@ public class KeycloakUserController {
    // --- NUEVOS ENDPOINTS PARA BUSCAR USUARIOS POR ROL (CORREGIDOS) ---
 
     @GetMapping("/byClientRole/{roleName}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')") /*SOLO EL ADMIN PUEDE INGRESAR */
     public Mono<ResponseEntity<List<Map<String, Object>>>> getUsersByClientRole(@PathVariable String roleName) {
         System.out.println("--- CONTROLADOR: Solicitando usuarios con rol de cliente: " + roleName + " ---");
         
