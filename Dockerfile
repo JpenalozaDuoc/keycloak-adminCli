@@ -1,35 +1,18 @@
-# Etapa 1: Construcción con Maven y JDK 17
-FROM maven:3.9.6-eclipse-temurin-17 AS buildstage
-
+# Etapa 1: Build con Maven y Java 17
+FROM maven:3.9.6-eclipse-temurin-17 AS build
 WORKDIR /app
-
-# Copiar archivos necesarios
 COPY pom.xml .
 COPY src /app/src
-
-# --- Líneas eliminadas: NO COPIAR WALLET NI CONFIGURAR TNS_ADMIN ---
-# COPY src/wallet /app/wallet
-# ENV TNS_ADMIN=/app/wallet
-# ------------------------------------------------------------------
-
-# Compilar la aplicación sin ejecutar los tests
 RUN mvn clean package -DskipTests
 
-# Etapa 2: Imagen de ejecución con solo JDK 17
+# Etapa 2: Imagen de ejecución con JDK 17
 FROM eclipse-temurin:17-jdk
-
 WORKDIR /app
+COPY --from=build /app/target/*.jar app.jar
 
-# Copiar el JAR generado desde la etapa de build
-COPY --from=buildstage /app/target/*.jar /app/app.jar
+# Exponer el puerto en que tu app escucha
+EXPOSE 8081
 
-# --- Líneas eliminadas: NO COPIAR WALLET NI CONFIGURAR TNS_ADMIN ---
-# COPY src/wallet /app/wallet
-# ENV TNS_ADMIN=/app/wallet
-# ------------------------------------------------------------------
-
-# Puerto que expone tu aplicación (¡IMPORTANTE: este puerto puede ser diferente para este microservicio!)
-EXPOSE 8081 
-
-# Comando de inicio
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]
+# docker build -t keycloak_admin_cli .
+# docker run -d -p 8081:8081 --name keycloak_admin_cli_app --restart unless-stopped keycloak_admin_cli
