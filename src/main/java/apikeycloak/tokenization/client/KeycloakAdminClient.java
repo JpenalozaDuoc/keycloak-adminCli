@@ -115,24 +115,6 @@ public class KeycloakAdminClient {
         );
     }
 
-    /**
-     * Obtiene un usuario específico por su ID.
-     * @param userId El ID interno del usuario en Keycloak.
-     * @return Mono<String> que emite una cadena JSON con los detalles del usuario.
-     */
-    public Mono<String> obtenerUsuarioPorId(String userId) {
-        return getAdminAccessToken().flatMap(token ->
-            webClient.get()
-                .uri(adminUrl + "/users/" + userId)
-                .headers(headers -> headers.setBearerAuth(token))
-                .retrieve()
-                .bodyToMono(String.class)
-                .onErrorResume(e -> {
-                    System.err.println("Error al obtener usuario " + userId + ": " + e.getMessage());
-                    return Mono.error(new RuntimeException("Error al obtener usuario: " + userId, e));
-                })
-        );
-    }
 
     /**
      * Crea un nuevo usuario en Keycloak.
@@ -420,5 +402,61 @@ public class KeycloakAdminClient {
                 })
         );
     }
+
+    /**
+     * Obtiene un usuario específico por su ID.
+     * @param userId El ID interno del usuario en Keycloak.
+     * @return Mono<Map<String, Object>> que emite un mapa con los detalles del usuario.
+     * Emite Mono.empty() si el usuario no es encontrado (404).
+     */
+    public Mono<Map<String, Object>> obtenerUsuarioPorId(String userId) {
+        System.out.println("--- CLIENT: Buscando usuario con ID: " + userId + " en " + adminUrl + "/users/" + userId + " ---");
+        return getAdminAccessToken().flatMap(token ->
+            webClient.get()
+                .uri(adminUrl + "/users/" + userId)
+                .headers(headers -> headers.setBearerAuth(token))
+                .retrieve()
+                // Manejar específicamente el 404 Not Found para devolver Mono.empty()
+                .onStatus(status -> status == HttpStatus.NOT_FOUND, clientResponse -> {
+                    System.out.println("Usuario con ID '" + userId + "' no encontrado (HTTP 404).");
+                    return Mono.empty(); // Retorna un Mono vacío para 404
+                })
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> {
+                                      System.err.println("Error al obtener usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody);
+                                      return Mono.error(new RuntimeException("Error al obtener usuario: " + userId + " - " + errorBody));
+                                  })
+                )
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .doOnSuccess(userMap -> {
+                    if (userMap != null) {
+                        System.out.println("Respuesta de Keycloak para usuario " + userId + ": " + userMap);
+                    }
+                })
+                .doOnError(e -> System.err.println("Error reactivo en obtenerUsuarioPorId: " + e.getMessage()))
+        );
+    }
+    
+    /**
+     * Obtiene un usuario específico por su ID.
+     * @param userId El ID interno del usuario en Keycloak.
+     * @return Mono<String> que emite una cadena JSON con los detalles del usuario.
+     */
+    /*
+    public Mono<String> obtenerUsuarioPorId(String userId) {
+        return getAdminAccessToken().flatMap(token ->
+            webClient.get()
+                .uri(adminUrl + "/users/" + userId)
+                .headers(headers -> headers.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(String.class)
+                .onErrorResume(e -> {
+                    System.err.println("Error al obtener usuario " + userId + ": " + e.getMessage());
+                    return Mono.error(new RuntimeException("Error al obtener usuario: " + userId, e));
+                })
+        );
+    }
+    */
 
 }

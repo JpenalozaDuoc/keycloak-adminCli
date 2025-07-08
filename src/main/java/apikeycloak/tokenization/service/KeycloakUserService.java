@@ -1,5 +1,6 @@
 package apikeycloak.tokenization.service;
 
+import apikeycloak.tokenization.client.KeycloakAdminClient;
 import apikeycloak.tokenization.config.KeycloakProperties;
 import apikeycloak.tokenization.dto.KeycloakUserResponse;
 import apikeycloak.tokenization.dto.UsuarioRequest;
@@ -19,15 +20,20 @@ public class KeycloakUserService {
     private final WebClient webClient; // <-- Reemplaza RestTemplate por WebClient
     private final ObjectMapper objectMapper;
     private final KeycloakProperties keycloakProperties;
+    private final KeycloakAdminClient keycloakAdminClient; // <-- Asumimos que tienes un cliente para operaciones admin
 
     public KeycloakUserService(
             WebClient webClient, // <-- Ahora inyectamos WebClient
             ObjectMapper objectMapper,
-            KeycloakProperties keycloakProperties) {
+            KeycloakProperties keycloakProperties,
+            KeycloakAdminClient keycloakAdminClient){ // <-- Asumimos que tienes un cliente para operaciones admin) {
         this.webClient = webClient; // <-- Asignamos WebClient
         this.objectMapper = objectMapper;
         this.keycloakProperties = keycloakProperties;
+        this.keycloakAdminClient = keycloakAdminClient; // <-- Asignamos el cliente admin
     }
+
+    
 
     // -------------------------
     // 1. Crear usuario
@@ -364,5 +370,46 @@ public class KeycloakUserService {
             System.err.println("ERROR: Fallo al eliminar usuario " + userId + ": " + e.getMessage());
             throw new RuntimeException("Fallo al eliminar usuario en Keycloak: " + e.getMessage(), e);
         }
+    }
+
+    // --- NUEVO MÉTODO: BUSCAR USUARIO POR ID ---
+    public Mono<KeycloakUserResponse> findUserById(String userId) {
+        System.out.println("--- SERVICIO: Buscando usuario con ID: " + userId + " ---");
+        return keycloakAdminClient.obtenerUsuarioPorId(userId)
+                .map(userMap -> {
+                    // Mapear el Map a tu DTO KeycloakUserResponse
+                    System.out.println("Usuario recibido en servicio: " + userMap);
+                    // Safe extraction and conversion of attributes
+                    Map<String, List<String>> attributes = new HashMap<>();
+                    Object attrsObj = userMap.get("attributes");
+                    if (attrsObj instanceof Map<?, ?>) {
+                        Map<?, ?> rawAttrs = (Map<?, ?>) attrsObj;
+                        for (Map.Entry<?, ?> entry : rawAttrs.entrySet()) {
+                            if (entry.getKey() instanceof String && entry.getValue() instanceof List<?>) {
+                                List<?> rawList = (List<?>) entry.getValue();
+                                List<String> stringList = new ArrayList<>();
+                                for (Object item : rawList) {
+                                    if (item instanceof String) {
+                                        stringList.add((String) item);
+                                    }
+                                }
+                                attributes.put((String) entry.getKey(), stringList);
+                            }
+                        }
+                    }
+
+                    KeycloakUserResponse response = new KeycloakUserResponse();
+                    response.setId((String) userMap.get("id"));
+                    response.setUsername((String) userMap.get("username"));
+                    response.setFirstName((String) userMap.get("firstName"));
+                    response.setLastName((String) userMap.get("lastName"));
+                    response.setEmail((String) userMap.get("email"));
+                    response.setEmailVerified((Boolean) userMap.get("emailVerified"));
+                    response.setEnabled((Boolean) userMap.get("enabled"));
+                    response.setAttributes(attributes);
+                    return response;
+                })
+                .switchIfEmpty(Mono.error(new NoSuchElementException("Usuario no encontrado con ID: " + userId)))
+                .doOnError(e -> log.error("Error en findUserById para {}: {}", userId, e.getMessage()));
     }
 }

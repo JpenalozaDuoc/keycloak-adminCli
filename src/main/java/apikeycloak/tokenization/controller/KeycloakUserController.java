@@ -61,7 +61,8 @@ public class KeycloakUserController {
     }*/
     
     @PostMapping("/create")   
-    @PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    //@PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public ResponseEntity<?> crearUsuario(@Valid @RequestBody UsuarioRequest usuarioRequest,
                                          HttpServletRequest request) { // ¡Añade HttpServletRequest aquí!
         // --- INICIO: Código para imprimir el token recibido desde el frontend ---
@@ -122,7 +123,8 @@ public class KeycloakUserController {
 
     // Listar usuarios, devuelve lista simple (puedes mejorar el DTO o paginación si quieres)
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    //@PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public ResponseEntity<List<KeycloakUserResponse>> listarUsuarios(
             @RequestParam(required = false) String username) {
         List<KeycloakUserResponse> usuarios = keycloakUserService.listarUsuarios(username);
@@ -131,7 +133,8 @@ public class KeycloakUserController {
     
     // Asignar rol a usuario específico
     @PostMapping("/{userId}/roles")
-    @PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    //@PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public ResponseEntity<?> asignarRol(
             @PathVariable String userId,
             @RequestParam String rol) {
@@ -147,7 +150,8 @@ public class KeycloakUserController {
     }
 
     @GetMapping("/all")
-    @PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    //@PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public ResponseEntity<List<KeycloakUserResponse>> listarUsuariosGen(
             @RequestParam(required = false) String username) {
         if (username == null || username.isEmpty()) {
@@ -162,7 +166,8 @@ public class KeycloakUserController {
 
     // Actualizar usuario (nuevo endpoint que integra tu método en el servicio)
     @PutMapping("/{userId}")
-    @PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    //@PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public ResponseEntity<?> actualizarUsuario(
             @PathVariable String userId,
             @Valid @RequestBody UsuarioRequest usuarioRequest) {
@@ -178,7 +183,8 @@ public class KeycloakUserController {
     }
 
     @GetMapping("/roles") // Endpoint para obtener TODOS los roles del cliente vetcare-app
-    @PreAuthorize("hasRole('ADMIN')") // O un rol apropiado que tenga el usuario autenticado
+    //@PreAuthorize("hasRole('ADMIN')") // O un rol apropiado que tenga el usuario autenticado
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public Mono<ResponseEntity<List<String>>> listarTodosLosRolesDelClienteKeycloak() {
         System.out.println("--- CONTROLADOR: Solicitando TODOS los roles del CLIENTE Keycloak (Usando WebClient) ---");
 
@@ -203,7 +209,8 @@ public class KeycloakUserController {
     }
 
     @DeleteMapping("/delete/{userId}")
-    @PreAuthorize("hasRole('ADMIN')") // Solo un admin puede eliminar usuarios
+    //@PreAuthorize("hasRole('ADMIN')") // Solo un admin puede eliminar usuarios
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public ResponseEntity<?> eliminarUsuario(@PathVariable String userId) {
         try {
             keycloakUserService.eliminarUsuario(userId);
@@ -228,7 +235,8 @@ public class KeycloakUserController {
    // --- NUEVOS ENDPOINTS PARA BUSCAR USUARIOS POR ROL (CORREGIDOS) ---
 
     @GetMapping("/byClientRole/{roleName}")
-    @PreAuthorize("hasRole('ADMIN')") /*SOLO EL ADMIN PUEDE INGRESAR */
+    //@PreAuthorize("hasRole('ADMIN')") /*SOLO EL ADMIN PUEDE INGRESAR */
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public Mono<ResponseEntity<List<Map<String, Object>>>> getUsersByClientRole(@PathVariable String roleName) {
         System.out.println("--- CONTROLADOR: Solicitando usuarios con rol de cliente: " + roleName + " ---");
         
@@ -261,7 +269,8 @@ public class KeycloakUserController {
      * @return Mono<ResponseEntity<List<Map<String, Object>>>> Una respuesta HTTP con la lista de usuarios.
      */
     @GetMapping("/byRealmRole/{roleName}")
-    @PreAuthorize("hasRole('ADMIN')")
+    //@PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
     public Mono<ResponseEntity<List<Map<String, Object>>>> getUsersByRealmRole(@PathVariable String roleName) {
         System.out.println("--- CONTROLADOR: Solicitando usuarios con rol de reino: " + roleName + " ---");
 
@@ -285,4 +294,28 @@ public class KeycloakUserController {
                 });
     }
     
+    // NUEVO MÉTODO: BUSCAR USUARIO POR ID
+    @GetMapping("/{userId}")
+    //@PreAuthorize("hasRole('ADMIN')") // Asumiendo que solo ADMIN puede buscar por ID
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
+    public Mono<ResponseEntity<?>> buscarUsuarioPorId(@PathVariable String userId) {
+        System.out.println("--- CONTROLADOR: Solicitando usuario con ID: " + userId + " ---");
+        return keycloakUserService.findUserById(userId)
+                .map(user -> {
+                    if (user != null) {
+                        System.out.println("Usuario con ID '" + userId + "' encontrado.");
+                        return ResponseEntity.ok(user);
+                    } else {
+                        System.out.println("Usuario con ID '" + userId + "' no encontrado.");
+                        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                                .body(Collections.singletonMap("message", "Usuario no encontrado con ID: " + userId));
+                    }
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error en el controlador al buscar usuario por ID '" + userId + "': " + e.getMessage());
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                            .body(Collections.singletonMap("error", "Error al buscar usuario: " + e.getMessage())));
+                });
+    }
+
 }
