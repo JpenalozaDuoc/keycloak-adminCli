@@ -10,32 +10,22 @@ public class UsuarioRequest {
 
     @NotBlank(message = "El username es obligatorio")
     private String username;
-
     @NotBlank(message = "El nombre es obligatorio")
     private String firstName;
-
     private String lastName;
-
     @Email(message = "El email debe ser válido")
     @NotBlank(message = "El email es obligatorio")
     private String email;
-
     private Boolean emailVerified = false;
-
     private Map<String, List<String>> attributes;
-
     @Size(min = 6, message = "La contraseña debe tener al menos 6 caracteres")
     private String password;
-
     private String rol;
-
     private Boolean enabled = true;
 
-    // Constructor vacío
     public UsuarioRequest() {
     }
 
-    // Constructor con todos los campos
     public UsuarioRequest(String username, String firstName, String lastName, String email, Boolean emailVerified,
                           Map<String, List<String>> attributes, String password, String rol, Boolean enabled) {
         this.username = username;
@@ -49,7 +39,6 @@ public class UsuarioRequest {
         this.enabled = enabled;
     }
 
-    // Getters y setters
 
     public String getUsername() {
         return username;
