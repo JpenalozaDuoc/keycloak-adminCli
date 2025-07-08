@@ -10,7 +10,6 @@ public class WebClientConfig {
     @Bean
     public WebClient webClient() {
         return WebClient.builder()
-                // Opcional: base URL común (puedes poner la URL del admin o del token)
                 .build();
     }
 }

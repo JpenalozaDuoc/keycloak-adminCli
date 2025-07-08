@@ -17,40 +17,25 @@ import reactor.core.publisher.Mono;
 @Component
 public class KeycloakAdminClient {
 
-    private final WebClient webClient; // Usaremos WebClient para peticiones no bloqueantes
+    private final WebClient webClient; 
     private final KeycloakProperties keycloakProperties;
-    
-    // Variables globales para la configuración del cliente administrativo y URLs
     private final String clientId;      // Para keycloak.client-id (vetcare-app-service)
     private final String clientSecret;  // Para keycloak.client-secret
     private final String tokenUri;      // Para keycloak.token-uri
     private final String adminUrl;      // Para keycloak.admin-url
     private final String clientName;    // Para keycloak.client-name (vetcare-app)
-
-    // Cache simple para el token de administración
     private String adminAccessToken;
     private long tokenExpiryTime = 0;
 
-    // Constructor: Spring inyectará WebClient.Builder y KeycloakProperties
     public KeycloakAdminClient(WebClient.Builder webClientBuilder, KeycloakProperties keycloakProperties) {
-        this.webClient = webClientBuilder.build(); // Construye el WebClient
+        this.webClient = webClientBuilder.build(); 
         this.keycloakProperties = keycloakProperties;
-        // Inicializar las variables globales a partir de KeycloakProperties
         this.clientId = keycloakProperties.getClientId();
         this.clientSecret = keycloakProperties.getClientSecret();
         this.tokenUri = keycloakProperties.getTokenUri();
         this.adminUrl = keycloakProperties.getAdminUrl();
-        this.clientName = keycloakProperties.getClientName(); // También clientName para mayor comodidad
-       
-        System.out.println("\n--- DEBUG: KeycloakProperties en KeycloakAdminClient ---");
-        System.out.println("Server URL: " + keycloakProperties.getServerUrl());
-        System.out.println("Realm: " + keycloakProperties.getRealm());
-        System.out.println("Admin URL: " + keycloakProperties.getAdminUrl());
-        System.out.println("Token URI: " + keycloakProperties.getTokenUri()); // <-- Usando getTokenUri()
-        System.out.println("Client ID (Admin): " + keycloakProperties.getClientId());
-        System.out.println("Client Secret (Admin - parcial): " + (keycloakProperties.getClientSecret() != null ? keycloakProperties.getClientSecret().substring(0, Math.min(5, keycloakProperties.getClientSecret().length())) + "..." : "NULL"));
-        System.out.println("Client Name (Target App): " + keycloakProperties.getClientName());
-        System.out.println("------------------------------------------------------\n");
+        this.clientName = keycloakProperties.getClientName(); 
+
     }
 
     /**
@@ -59,17 +44,13 @@ public class KeycloakAdminClient {
      * @return Mono<String> que emite el token de acceso.
      */
     public Mono<String> getAdminAccessToken() {
-        // Si el token está en caché y aún es válido, lo devuelve inmediatamente
         if (adminAccessToken != null && System.currentTimeMillis() < tokenExpiryTime) {
             return Mono.just(adminAccessToken);
         }
-
-        // Añade verificaciones explícitas antes de URLEncoder.encode (mantén esto para depuración)
         if (clientId == null) { System.err.println("ERROR DEBUG: clientId (para token de admin) es NULL!"); return Mono.error(new NullPointerException("clientId es NULL")); }
         if (clientSecret == null) { System.err.println("ERROR DEBUG: clientSecret (para token de admin) es NULL!"); return Mono.error(new NullPointerException("clientSecret es NULL")); }
         if (tokenUri == null) { System.err.println("ERROR DEBUG: tokenUri es NULL!"); return Mono.error(new NullPointerException("tokenUri es NULL")); }
 
-        // Si no, solicita un nuevo token
         String body = "grant_type=client_credentials" +
                       "&client_id=" + URLEncoder.encode(clientId, StandardCharsets.UTF_8) +
                       "&client_secret=" + URLEncoder.encode(clientSecret, StandardCharsets.UTF_8);
@@ -79,18 +60,18 @@ public class KeycloakAdminClient {
                 .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                 .bodyValue(body)
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}) // Espera un mapa como respuesta
-                .doOnNext(responseBody -> { // Ejecuta esto cuando el Mono emita el mapa
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}) 
+                .doOnNext(responseBody -> { 
                     if (responseBody != null && responseBody.containsKey("access_token")) {
                         adminAccessToken = (String) responseBody.get("access_token");
                         Integer expiresIn = (Integer) responseBody.get("expires_in");
-                        tokenExpiryTime = System.currentTimeMillis() + (expiresIn - 30) * 1000L; // Refrescar 30s antes
+                        tokenExpiryTime = System.currentTimeMillis() + (expiresIn - 30) * 1000L; 
                         System.out.println("Token de administración de Keycloak obtenido/refrescado.");
                     } else {
                         throw new RuntimeException("No se pudo obtener token admin de Keycloak: Respuesta inválida o incompleta.");
                     }
                 })
-                .map(responseBody -> adminAccessToken) // Devuelve solo el token de acceso
+                .map(responseBody -> adminAccessToken)
                 .onErrorResume(e -> {
                     System.err.println("Error al obtener el token de administración de Keycloak: " + e.getMessage());
                     return Mono.error(new RuntimeException("Error al obtener token admin de Keycloak", e));
@@ -115,24 +96,6 @@ public class KeycloakAdminClient {
         );
     }
 
-    /**
-     * Obtiene un usuario específico por su ID.
-     * @param userId El ID interno del usuario en Keycloak.
-     * @return Mono<String> que emite una cadena JSON con los detalles del usuario.
-     */
-    public Mono<String> obtenerUsuarioPorId(String userId) {
-        return getAdminAccessToken().flatMap(token ->
-            webClient.get()
-                .uri(adminUrl + "/users/" + userId)
-                .headers(headers -> headers.setBearerAuth(token))
-                .retrieve()
-                .bodyToMono(String.class)
-                .onErrorResume(e -> {
-                    System.err.println("Error al obtener usuario " + userId + ": " + e.getMessage());
-                    return Mono.error(new RuntimeException("Error al obtener usuario: " + userId, e));
-                })
-        );
-    }
 
     /**
      * Crea un nuevo usuario en Keycloak.
@@ -149,8 +112,8 @@ public class KeycloakAdminClient {
                 })
                 .bodyValue(usuarioPayload)
                 .retrieve()
-                .toBodilessEntity() // Para respuestas sin cuerpo (ej. 201 Created)
-                .then() // Convierte a Mono<Void>
+                .toBodilessEntity() 
+                .then() 
                 .onErrorResume(e -> {
                     System.err.println("Error al crear usuario: " + e.getMessage());
                     return Mono.error(new RuntimeException("Error creando usuario", e));
@@ -212,7 +175,6 @@ public class KeycloakAdminClient {
     
     public Mono<Void> asignarRolRealm(String userId, String rolName) {
         return getAdminAccessToken().flatMap(token -> {
-            // Paso 1: Obtener la representación del rol (UUID y nombre)
             String roleUrl = adminUrl + "/roles/" + URLEncoder.encode(rolName, StandardCharsets.UTF_8);
             return webClient.get()
                 .uri(roleUrl)
@@ -220,8 +182,6 @@ public class KeycloakAdminClient {
                 .retrieve()
                 .bodyToMono(Map.class)
                 .flatMap(roleRepresentation -> {
-                    // Paso 2: Asignar el rol al usuario
-                    // El payload debe ser una lista de objetos de rol
                     @SuppressWarnings("unchecked")
                     List<Map<String, Object>> rolesPayload = List.of((Map<String, Object>) roleRepresentation);
 
@@ -257,7 +217,6 @@ public class KeycloakAdminClient {
     
     public Mono<Void> asignarRolCliente(String userId, String clientName, String roleName) {
         return getAdminAccessToken().flatMap(token -> {
-            // Paso 1: Obtener el UUID del cliente por su client_id
             String clientsSearchUrl = adminUrl + "/clients?clientId=" + URLEncoder.encode(clientName, StandardCharsets.UTF_8);
             return webClient.get()
                 .uri(clientsSearchUrl)
@@ -269,8 +228,6 @@ public class KeycloakAdminClient {
                         return Mono.error(new RuntimeException("Cliente Keycloak con ID '" + clientName + "' no encontrado."));
                     }
                     String clientUuid = (String) clients.get(0).get("id");
-
-                    // Paso 2: Obtener la representación del rol del cliente (UUID y nombre)
                     String clientRoleUrl = adminUrl + "/clients/" + clientUuid + "/roles/" + URLEncoder.encode(roleName, StandardCharsets.UTF_8);
                     return webClient.get()
                         .uri(clientRoleUrl)
@@ -278,7 +235,6 @@ public class KeycloakAdminClient {
                         .retrieve()
                         .bodyToMono(Map.class)
                         .flatMap(roleRepresentation -> {
-                            // Paso 3: Asignar el rol del cliente al usuario
                             @SuppressWarnings("unchecked")
                             List<Map<String, Object>> rolesPayload = List.of((Map<String, Object>) roleRepresentation);
                             String assignRoleUrl = adminUrl + "/users/" + userId + "/role-mappings/clients/" + clientUuid;
@@ -356,10 +312,6 @@ public class KeycloakAdminClient {
         });
     }
 
-    /** AQUI VA LA LOGICA DE OBTENER USUARIOS POR EL ROL */
-    
-    // --- Métodos de búsqueda de usuarios por rol ---
-
     /**
      * Obtiene una lista de usuarios que tienen asignado directamente un rol de REINO.
      * Nota: Esto no incluye usuarios que obtienen el rol a través de grupos o roles compuestos.
@@ -389,7 +341,6 @@ public class KeycloakAdminClient {
      */
     public Mono<List<Map<String, Object>>> getUsersByClientRole(String clientRoleName) {
         return getAdminAccessToken().flatMap(token ->
-            // Paso 1: Obtener el UUID del cliente por su client_id
             webClient.get()
                 .uri(adminUrl + "/clients?clientId=" + URLEncoder.encode(this.clientName, StandardCharsets.UTF_8))
                 .headers(h -> h.setBearerAuth(token))
@@ -398,11 +349,9 @@ public class KeycloakAdminClient {
                 .flatMap(clients -> {
                     if (clients == null || clients.isEmpty()) {
                         System.err.println("Cliente Keycloak con ID '" + this.clientName + "' no encontrado para buscar roles.");
-                        return Mono.<List<Map<String, Object>>>just(Collections.emptyList()); // Devuelve lista vacía si el cliente no existe
+                        return Mono.<List<Map<String, Object>>>just(Collections.emptyList()); 
                     }
                     String clientUuid = (String) clients.get(0).get("id");
-
-                    // Paso 2: Obtener los usuarios asignados directamente a ese rol del cliente
                     String usersByClientRoleUrl = adminUrl + "/clients/" + clientUuid + "/roles/" + URLEncoder.encode(clientRoleName, StandardCharsets.UTF_8) + "/users";
                     return webClient.get()
                         .uri(usersByClientRoleUrl)
@@ -420,5 +369,40 @@ public class KeycloakAdminClient {
                 })
         );
     }
+
+    /**
+     * Obtiene un usuario específico por su ID.
+     * @param userId El ID interno del usuario en Keycloak.
+     * @return Mono<Map<String, Object>> que emite un mapa con los detalles del usuario.
+     * Emite Mono.empty() si el usuario no es encontrado (404).
+     */
+    public Mono<Map<String, Object>> obtenerUsuarioPorId(String userId) {
+        System.out.println("--- CLIENT: Buscando usuario con ID: " + userId + " en " + adminUrl + "/users/" + userId + " ---");
+        return getAdminAccessToken().flatMap(token ->
+            webClient.get()
+                .uri(adminUrl + "/users/" + userId)
+                .headers(headers -> headers.setBearerAuth(token))
+                .retrieve()
+                .onStatus(status -> status == HttpStatus.NOT_FOUND, clientResponse -> {
+                    System.out.println("Usuario con ID '" + userId + "' no encontrado (HTTP 404).");
+                    return Mono.empty(); 
+                })
+                .onStatus(HttpStatusCode::isError, clientResponse ->
+                    clientResponse.bodyToMono(String.class)
+                                  .flatMap(errorBody -> {
+                                      System.err.println("Error al obtener usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody);
+                                      return Mono.error(new RuntimeException("Error al obtener usuario: " + userId + " - " + errorBody));
+                                  })
+                )
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .doOnSuccess(userMap -> {
+                    if (userMap != null) {
+                        System.out.println("Respuesta de Keycloak para usuario " + userId + ": " + userMap);
+                    }
+                })
+                .doOnError(e -> System.err.println("Error reactivo en obtenerUsuarioPorId: " + e.getMessage()))
+        );
+    }
+
 
 }
