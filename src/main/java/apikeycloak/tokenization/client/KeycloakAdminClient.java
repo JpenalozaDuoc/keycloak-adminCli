@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Collections;
+//import java.util.HashMap;
 import java.util.stream.Collectors;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import apikeycloak.tokenization.config.KeycloakProperties;
+//import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Component
@@ -96,6 +98,39 @@ public class KeycloakAdminClient {
         );
     }
 
+    public Mono<List<Map<String, Object>>> listarUsuariosMap() {
+        return getAdminAccessToken().flatMap(token ->
+            webClient.get()
+                .uri(adminUrl + "/users")
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .onErrorResume(e -> {
+                    System.err.println("Error al listar usuarios: " + e.getMessage());
+                    return Mono.error(new RuntimeException("Error al listar usuarios", e));
+                })
+        );
+    }
+
+    /*
+    public Mono<List<Map<String, Object>>> listarUsuariosConRolesDeCliente(String clientName) {
+        return listarUsuariosMap()
+            .flatMapMany(Flux::fromIterable)
+            .flatMap(usuario -> {
+                String userId = (String) usuario.get("id");
+                String username = (String) usuario.get("username");
+                return obtenerRolesClienteDeUsuario(userId, clientName)
+                    .map(roles -> {
+                        Map<String, Object> usuarioConRoles = new HashMap<>();
+                        usuarioConRoles.put("id", userId);
+                        usuarioConRoles.put("username", username);
+                        usuarioConRoles.put("roles", roles);
+                        return usuarioConRoles;
+                    });
+            })
+            .collectList();
+    }
+    */
 
     /**
      * Crea un nuevo usuario en Keycloak.
@@ -369,6 +404,108 @@ public class KeycloakAdminClient {
                 })
         );
     }
+    
+    /**
+     * **NUEVO MÉTODO:** Elimina un rol de cliente de un usuario.
+     * Keycloak requiere que el DELETE body contenga la representación del rol a eliminar.
+     * @param userId El ID del usuario en Keycloak.
+     * @param clientName El client-id de tu aplicación.
+     * @param roleName El nombre del rol de cliente a eliminar.
+     * @return Mono<Void> que indica la finalización de la operación.
+     */
+    public Mono<Void> eliminarRolCliente(String userId, String clientName, String roleName) {
+        return getAdminAccessToken().flatMap(token -> {
+            String clientsSearchUrl = adminUrl + "/clients?clientId=" + URLEncoder.encode(clientName, StandardCharsets.UTF_8);
+            return webClient.get()
+                .uri(clientsSearchUrl)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .flatMap(clients -> {
+                    if (clients == null || clients.isEmpty()) {
+                        return Mono.error(new RuntimeException("Cliente Keycloak con ID '" + clientName + "' no encontrado."));
+                    }
+                    String clientUuid = (String) clients.get(0).get("id");
+                    String clientRoleUrl = adminUrl + "/clients/" + clientUuid + "/roles/" + URLEncoder.encode(roleName, StandardCharsets.UTF_8);
+                    return webClient.get()
+                        .uri(clientRoleUrl)
+                        .headers(h -> h.setBearerAuth(token))
+                        .retrieve()
+                        .bodyToMono(Map.class)
+                        .flatMap(roleRepresentation -> {
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, Object>> rolesPayload = List.of((Map<String, Object>) roleRepresentation);
+                            String deleteRoleUrl = adminUrl + "/users/" + userId + "/role-mappings/clients/" + clientUuid;
+
+                            return webClient.method(HttpMethod.DELETE) // ¡Aquí la clave! Permite enviar un cuerpo en DELETE
+                                .uri(deleteRoleUrl)
+                                .headers(headers -> {
+                                    headers.setBearerAuth(token);
+                                    headers.setContentType(MediaType.APPLICATION_JSON);
+                                })
+                                .bodyValue(rolesPayload) // El cuerpo DELETE debe contener la representación del rol
+                                .retrieve()
+                                .toBodilessEntity()
+                                .then()
+                                .onErrorResume(e -> {
+                                    System.err.println("Error eliminando rol de cliente " + roleName + " de usuario " + userId + ": " + e.getMessage());
+                                    return Mono.error(new RuntimeException("Error eliminando rol de cliente", e));
+                                });
+                        })
+                        .onErrorResume(e -> {
+                            System.err.println("Error al obtener la representación del rol de cliente " + roleName + " para eliminar: " + e.getMessage());
+                            return Mono.error(new RuntimeException("Rol de cliente no encontrado o error al obtener rol para eliminar: " + roleName, e));
+                        });
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error al buscar cliente " + clientName + " para eliminar rol: " + e.getMessage());
+                    return Mono.error(new RuntimeException("Error al buscar cliente para eliminar rol", e));
+                });
+        });
+    }
+
+    // --- NUEVO MÉTODO PARA OBTENER ROLES DE CLIENTE DE UN USUARIO ---
+    /**
+     * **NUEVO MÉTODO:** Obtiene todos los roles de cliente asignados a un usuario para un cliente específico.
+     * @param userId El ID del usuario en Keycloak.
+     * @param clientName El client-id de tu aplicación.
+     * @return Mono que emite una lista de mapas, cada mapa representa un rol (con "id", "name", etc.).
+     */
+    //public Mono<Object> obtenerRolesClienteDeUsuario(String userId, String clientName) {
+    public Mono<Object> obtenerRolesClienteDeUsuario(String userId, String clientName) {
+        return getAdminAccessToken().flatMap(token -> {
+            String clientsSearchUrl = adminUrl + "/clients?clientId=" + URLEncoder.encode(clientName, StandardCharsets.UTF_8);
+            return webClient.get()
+                .uri(clientsSearchUrl)
+                .headers(h -> h.setBearerAuth(token))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                //.bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .map(list -> (List<Map<String, Object>>) list) 
+                .flatMap(clients -> {
+                    if (clients == null || clients.isEmpty()) {
+                        System.err.println("Cliente Keycloak con ID '" + clientName + "' no encontrado para obtener roles de usuario.");
+                        return Mono.just(Collections.emptyList()); // Retorna lista vacía si el cliente no existe
+                    }
+                    String clientUuid = (String) clients.get(0).get("id");
+                    String rolesUrl = adminUrl + "/users/" + userId + "/role-mappings/clients/" + clientUuid;
+                    return webClient.get()
+                        .uri(rolesUrl)
+                        .headers(h -> h.setBearerAuth(token))
+                        .retrieve()
+                        .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                        .defaultIfEmpty(Collections.emptyList()) // Retorna lista vacía si no hay roles asignados
+                        .onErrorResume(e -> {
+                            System.err.println("Error al obtener roles de cliente para usuario " + userId + " y cliente " + clientName + ": " + e.getMessage());
+                            return Mono.error(new RuntimeException("Error al obtener roles de cliente de usuario", e));
+                        });
+                })
+                .onErrorResume(e -> {
+                    System.err.println("Error al buscar cliente " + clientName + " para obtener roles de usuario: " + e.getMessage());
+                    return Mono.error(new RuntimeException("Error al buscar cliente para obtener roles de usuario", e));
+                });
+        });
+    }
 
     /**
      * Obtiene un usuario específico por su ID.
@@ -403,6 +540,4 @@ public class KeycloakAdminClient {
                 .doOnError(e -> System.err.println("Error reactivo en obtenerUsuarioPorId: " + e.getMessage()))
         );
     }
-
-
 }

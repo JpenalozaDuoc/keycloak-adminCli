@@ -19,6 +19,7 @@ import reactor.core.publisher.Mono;
 import apikeycloak.tokenization.client.KeycloakAdminClient;
 import apikeycloak.tokenization.config.KeycloakProperties;
 import apikeycloak.tokenization.dto.KeycloakUserResponse;
+//import apikeycloak.tokenization.dto.KeycloakUserResponse;
 import apikeycloak.tokenization.dto.UsuarioRequest;
 import apikeycloak.tokenization.service.KeycloakUserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,7 +47,65 @@ public class KeycloakUserController {
         this.keycloakProperties = keycloakProperties;
         this.objectMapper = objectMapper;
     }
+    /*
+    @GetMapping
+    //@PreAuthorize("hasRole('ADMIN')") 
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
+    public ResponseEntity<List<KeycloakUserResponse>> listarUsuarios(
+            @RequestParam(required = false) String username) {
+        List<KeycloakUserResponse> usuarios = keycloakUserService.listarUsuarios(username);
+        return ResponseEntity.ok(usuarios);
+    }
+    */
     
+    @GetMapping("/all")
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
+    public Mono<ResponseEntity<List<KeycloakUserResponse>>> listarUsuariosConRolSimple() {
+        return keycloakUserService.listarUsuariosConRolSimple() // Llama al nuevo método del servicio
+                .map(ResponseEntity::ok)
+                .defaultIfEmpty(ResponseEntity.notFound().build());
+    }
+
+    // Puedes comentar o eliminar tus otros métodos listarUsuarios() que ya no son necesarios
+    // si este es el endpoint principal para obtener la lista de usuarios para la tabla.
+    /*
+    @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
+    public ResponseEntity<List<Map<String, Object>>> listarUsuarios() {
+        return ResponseEntity.ok(keycloakUserService.listarUsuarios());
+    }
+
+    @GetMapping("/con-roles")
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
+    public ResponseEntity<List<Map<String, Object>>> listarUsuariosConRoles(
+                @RequestParam(defaultValue = "vetcare-app") String clientName) {
+        return ResponseEntity.ok(keycloakUserService.listarUsuariosConRoles(clientName));
+    }    
+
+
+
+
+    
+    /*
+    public ResponseEntity<List<Map<String, Object>>> listarUsuarios() {
+        return ResponseEntity.ok(keycloakUserService.listarUsuarios());
+    }
+    
+    public ResponseEntity<List<KeycloakUserResponse>> listarUsuariosConRoles(
+            @RequestParam(required = false) String username) {
+        List<KeycloakUserResponse> usuarios = keycloakUserService.listarUsuariosConRoles(username);
+        return ResponseEntity.ok(usuarios);
+    }
+    */
+    
+    /*
+    @GetMapping("/con-roles")
+    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
+    public ResponseEntity<List<Map<String, Object>>> listarUsuariosConRoles(
+            @RequestParam(defaultValue = "vetcare-app") String clientName) {
+        return ResponseEntity.ok(keycloakUserService.listarUsuariosConRoles(clientName));
+    }
+    */
     @PostMapping("/create")   
     //@PreAuthorize("hasRole('ADMIN')") // <-- ¡AÑADE ESTO AQUÍ!
     @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
@@ -83,16 +142,7 @@ public class KeycloakUserController {
                     .body(Collections.singletonMap("error", e.getMessage()));
         }
     }
-
-    @GetMapping
-    //@PreAuthorize("hasRole('ADMIN')") 
-    @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
-    public ResponseEntity<List<KeycloakUserResponse>> listarUsuarios(
-            @RequestParam(required = false) String username) {
-        List<KeycloakUserResponse> usuarios = keycloakUserService.listarUsuarios(username);
-        return ResponseEntity.ok(usuarios);
-    }
-    
+   
     @PostMapping("/{userId}/roles")
     //@PreAuthorize("hasRole('ADMIN')")
     @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
@@ -108,6 +158,7 @@ public class KeycloakUserController {
         }
     }
 
+    /*
     @GetMapping("/all")
     //@PreAuthorize("hasRole('ADMIN')") 
     @PreAuthorize("hasAnyRole('ADMIN', 'VETERINARIO', 'ASISTENTE')")
@@ -120,6 +171,7 @@ public class KeycloakUserController {
             return ResponseEntity.ok(List.of()); 
         }
     }
+    */
 
     @PutMapping("/{userId}")
     //@PreAuthorize("hasRole('ADMIN')") 
