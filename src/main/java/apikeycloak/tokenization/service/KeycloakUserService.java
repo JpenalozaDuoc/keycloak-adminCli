@@ -79,7 +79,11 @@ public class KeycloakUserService {
 
         if (newUserId != null && usuarioRequest.getRol() != null && !usuarioRequest.getRol().isEmpty()) {
             try {
-                asignarRolAdmin(newUserId, usuarioRequest.getRol());
+                // *** CAMBIO CLAVE AQUÍ: Usamos el nuevo método para asignar rol de cliente ***
+                // Asumimos que `usuarioRequest.getRol()` contendrá un rol de cliente (ej. "VETERINARIO", "ASISTENTE")
+                // Y `keycloakProperties.getClientName()` será el `client_id` de tu aplicación (ej. "vetcare-app")
+                //asignarRolAdmin(newUserId, usuarioRequest.getRol());
+                asignarRolClienteAUsuario(newUserId, usuarioRequest.getRol());
                 log.info("Rol '{}' asignado al usuario con ID: {}", usuarioRequest.getRol(), newUserId);
             } catch (RuntimeException e) {
                 log.warn("Usuario creado pero NO se pudo asignar el rol '{}' al usuario con ID {}: {}",
@@ -112,7 +116,22 @@ public class KeycloakUserService {
         return listarUsuarios(null); 
     }
 
-    public void asignarRolAdmin(String userId, String rol) {
+    // *** NUEVO MÉTODO PARA ASIGNAR ROL DE CLIENTE ***
+    public void asignarRolClienteAUsuario(String userId, String rolCliente) {
+        log.info("Intentando asignar rol de cliente '{}' al usuario con ID '{}' para el cliente '{}'",
+                rolCliente, userId, keycloakProperties.getClientName());
+        try {
+            // Llama al método del KeycloakAdminClient que ya sabe cómo manejar roles de cliente
+            keycloakAdminClient.asignarRolCliente(userId, keycloakProperties.getClientName(), rolCliente).block();
+            log.info("Rol de cliente '{}' asignado exitosamente al usuario con ID '{}'.", rolCliente, userId);
+        } catch (Exception e) {
+            log.error("Error al asignar el rol de cliente '{}' al usuario con ID '{}': {}", rolCliente, userId, e.getMessage());
+            throw new RuntimeException("Error al asignar rol de cliente: " + e.getMessage(), e);
+        }
+    }
+
+    public void asignarRolAdminRealm(String userId, String rol) {
+        log.warn("Usando el método de asignación de rol de REINO. Asegúrate de que el rol '{}' es un rol de reino.", rol);
         String tokenAdmin = obtenerTokenAdminApi();
         String urlRole = String.format("%s/admin/realms/%s/roles/%s", keycloakProperties.getServerUrl(), keycloakProperties.getRealm(), rol);
         Map<String, Object> role = webClient.get()
@@ -137,7 +156,7 @@ public class KeycloakUserService {
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, clientResponse ->
                     clientResponse.bodyToMono(String.class)
-                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error asignando rol a usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody))))
+                                  .flatMap(errorBody -> Mono.error(new RuntimeException("Error asignando rol de REALM a usuario " + userId + ": " + clientResponse.statusCode() + " - " + errorBody))))
                 .toBodilessEntity() 
                 .block();
     }
