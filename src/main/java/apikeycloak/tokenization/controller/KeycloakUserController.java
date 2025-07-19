@@ -100,7 +100,7 @@ public class KeycloakUserController {
             @PathVariable String userId,
             @RequestParam String rol) {
         try {
-            keycloakUserService.asignarRolAdmin(userId, rol);
+            keycloakUserService.asignarRolClienteAUsuario(userId, rol);
             return ResponseEntity.ok(Collections.singletonMap("message", "Rol asignado correctamente")); // ¡AJUSTADO: consistent JSON!
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
