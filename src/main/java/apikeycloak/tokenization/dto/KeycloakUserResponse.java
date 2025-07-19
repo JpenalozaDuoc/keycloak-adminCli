@@ -18,6 +18,7 @@ public class KeycloakUserResponse {
     private String lastName;
     private Map<String, List<String>> attributes;
     private Access access;
+    private String rol;
 
     public KeycloakUserResponse() {}
 
@@ -74,7 +75,9 @@ public class KeycloakUserResponse {
     public void setAttributes(Map<String, List<String>> attributes) { this.attributes = attributes; } 
     public Access getAccess() { return access; }
     public void setAccess(Access access) { this.access = access; }
-
+    public String getRol() { return rol; }
+    public void setRol(String rol) { this.rol = rol; }
+    
     public String getTelefono() {
         if (attributes != null && attributes.containsKey("telefono")) {
             List<String> telefonos = attributes.get("telefono");
